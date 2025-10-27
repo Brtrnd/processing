@@ -5,11 +5,11 @@
 <title>Processing Shape Exporter</title>
 <style>
 body { font-family: sans-serif; margin:0; padding:0; height:100vh; display:flex; }
-#controls-panel { width:250px; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; gap:0.5rem; border-right:1px solid #ccc; overflow:auto; }
+#controls-panel { width:300px; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; gap:0.5rem; border-right:1px solid #ccc; overflow:auto; }
 #canvas-panel { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-start; padding:10px; box-sizing:border-box; }
-#canvas { border:1px solid #000; cursor: crosshair; max-width:100%; max-height:100%; }
+#canvas { border:1px solid #000; cursor: crosshair; max-width:100%; max-height:100%; color:red }
 #coords { margin-top:5px; }
-#out { margin-top:5px; width:100%; height:200px; resize:none; overflow:auto; }
+#out { margin-top:5px; width:100%; height:300px; resize:none; overflow:auto; }
 select, input { margin-right:5px; }
 </style>
 </head>
@@ -19,12 +19,12 @@ select, input { margin-right:5px; }
 <strong>Shape Mode</strong><br>
 <label><input type="radio" name="mode" value="rect" checked> Rect</label><br>
 <label><input type="radio" name="mode" value="ellipse"> Ellipse</label><br>
-<label><input type="radio" name="mode" value="triangle"> Triangle</label>
+<label><input type="radio" name="mode" value="triangle"> Triangle</label> <i>(klik 3 punten)</i>
 </div>
 <div>
 <strong>Ellipse Mode</strong><br>
-<label><input type="radio" name="ellipseMode" value="center" checked> Center</label><br>
-<label><input type="radio" name="ellipseMode" value="topleft"> Top-Left</label>
+<label><input type="radio" name="ellipseMode" value="center"> Center</label><br>
+<label><input type="radio" name="ellipseMode" value="topleft" checked> Top-Left</label>
 </div>
 <div>
 <strong>Canvas Size</strong><br>
@@ -34,8 +34,11 @@ select, input { margin-right:5px; }
 <option value="800">800x800</option>
 </select>
 </div>
+
 <div id="coords">Mouse: (0,0)</div>
-<textarea id="out" readonly></textarea>
+<textarea id="out"></textarea>
+Hierboven is processing code, <br>Je ziet code wijzigingen onmiddellijk in de tekening. <br>Je mag //commentaar toevoegen. Nieuwe vormen altijd onderaan.
+</div>
 </div>
 <div id="canvas-panel">
 <canvas id="canvas" width="600" height="600"></canvas>
@@ -48,23 +51,42 @@ select, input { margin-right:5px; }
     const coordsDiv = document.getElementById('coords');
     const canvasSizeDropdown = document.getElementById('canvasSize');
 
-    let mode = 'rect';
-    let ellipseMode = 'center';
-    let start = null;
-    let shapes = [];
-    let trianglePoints = []; // stores clicks for current triangle
 
-    // Mouse coordinates display
-    cv.addEventListener('mousemove', e => {
-      coordsDiv.textContent = `Mouse: (${e.offsetX}, ${e.offsetY})`;
+  // Current drawing mode: 'rect' | 'ellipse' | 'triangle'
+  let mode = 'rect';
+  // Ellipse interpretation mode: center-based or top-left based
+  let ellipseMode = 'center';
+  // Drag start point while drawing rectangles/ellipses
+  let start = null;
+  // Array of finalized shapes currently on the canvas
+    let shapes = [];
+    // Temporary storage for triangle vertex clicks
+    let trianglePoints = []; // stores clicks for current triangle
+  // Tracked mouse position (used instead of relying on a global `event`)
+  let mousePos = {x:0,y:0};
+
+    // Convert any pointer event's client coords to canvas-local coords
+    function toCanvasCoords(evt){
+      const r = cv.getBoundingClientRect();
+      return { x: Math.round(evt.clientX - r.left), y: Math.round(evt.clientY - r.top) };
+    }
+
+    // Track pointer globally so dragging can continue outside the canvas
+    window.addEventListener('mousemove', e => {
+      const p = toCanvasCoords(e);
+      mousePos.x = p.x; mousePos.y = p.y;
+      coordsDiv.textContent = `Mouse: (${mousePos.x}, ${mousePos.y})`;
       if (start && (mode === 'rect' || mode === 'ellipse')) redraw();
       if (trianglePoints.length > 0 && mode === 'triangle') redraw();
     });
 
     // Mouse down/up for shapes
     cv.addEventListener('mousedown', e => {
+      const p = toCanvasCoords(e);
+      // ensure start/clicks are only registered when originating inside the canvas
+      if (p.x < 0 || p.y < 0 || p.x > cv.width || p.y > cv.height) return;
       if (mode === 'triangle') {
-        trianglePoints.push({x:e.offsetX, y:e.offsetY});
+        trianglePoints.push({x:p.x, y:p.y});
         if (trianglePoints.length === 3) {
           shapes.push({type:'triangle', points: trianglePoints.slice()});
           trianglePoints = [];
@@ -74,14 +96,17 @@ select, input { margin-right:5px; }
           redraw();
         }
       } else {
-        start = {x:e.offsetX, y:e.offsetY};
+        start = {x:p.x, y:p.y};
+        mousePos.x = p.x; mousePos.y = p.y;
       }
     });
-
-    cv.addEventListener('mouseup', e => {
+    // Use a global mouseup handler so releasing outside the canvas still finalizes the shape
+    window.addEventListener('mouseup', e => {
+      if (!start) return; // nothing to finalize
+      const p = toCanvasCoords(e);
       if (mode === 'rect'){
-        const w = e.offsetX - start.x;
-        const h = e.offsetY - start.y;
+        const w = p.x - start.x;
+        const h = p.y - start.y;
         shapes.push({ type:'rect', x:start.x, y:start.y, w, h });
         start = null;
         dump();
@@ -90,11 +115,11 @@ select, input { margin-right:5px; }
         let cx, cy, rx, ry;
         if (ellipseMode === 'center'){
           cx = start.x; cy = start.y;
-          rx = Math.abs(e.offsetX - cx);
-          ry = Math.abs(e.offsetY - cy);
+          rx = Math.abs(p.x - cx);
+          ry = Math.abs(p.y - cy);
         } else {
           const x = start.x; const y = start.y;
-          const w = e.offsetX - x; const h = e.offsetY - y;
+          const w = p.x - x; const h = p.y - y;
           cx = x + w/2; cy = y + h/2;
           rx = Math.abs(w/2); ry = Math.abs(h/2);
         }
@@ -119,8 +144,24 @@ select, input { margin-right:5px; }
       redraw();
     });
 
+
+    // Redraw the entire canvas: background grid -> shapes -> live preview
     function redraw(){
       ctx.clearRect(0,0,cv.width,cv.height);
+      // Draw a very light grid every 100px to help alignment (background)
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 1;
+      // optional subtle dashed look
+      if (ctx.setLineDash) ctx.setLineDash([2, 6]);
+      for (let gx = 0; gx <= cv.width; gx += 100) {
+        ctx.beginPath(); ctx.moveTo(gx + 0.5, 0); ctx.lineTo(gx + 0.5, cv.height); ctx.stroke();
+      }
+      for (let gy = 0; gy <= cv.height; gy += 100) {
+        ctx.beginPath(); ctx.moveTo(0, gy + 0.5); ctx.lineTo(cv.width, gy + 0.5); ctx.stroke();
+      }
+      // restore to default stroke settings for shapes
+      ctx.restore();
       shapes.forEach(s=>{
         if (s.type==='rect') ctx.strokeRect(s.x,s.y,s.w,s.h);
         if (s.type==='ellipse'){ ctx.beginPath(); ctx.ellipse(s.cx,s.cy,s.rx,s.ry,0,0,Math.PI*2); ctx.stroke(); }
@@ -128,7 +169,7 @@ select, input { margin-right:5px; }
       });
       // Draw current dragging shape
       if (start && (mode==='rect'||mode==='ellipse')){
-        const x = start.x, y = start.y, mx = event.offsetX, my = event.offsetY;
+        const x = start.x, y = start.y, mx = mousePos.x, my = mousePos.y;
         ctx.strokeStyle='gray';
         if (mode==='rect') ctx.strokeRect(x,y,mx-x,my-y);
         if (mode==='ellipse'){
@@ -147,27 +188,41 @@ select, input { margin-right:5px; }
     }
 
     function dump(){
-      let code='fill(0);\n';
-      shapes.forEach(s=>{
-        if (s.type==='rect') code+=`rect(${s.x},${s.y},${s.w},${s.h});\n`;
-        if (s.type==='ellipse') code+=`ellipse(${s.cx},${s.cy},${s.rx*2},${s.ry*2});\n`;
-        if (s.type==='triangle') code+=`triangle(${s.points[0].x},${s.points[0].y},${s.points[1].x},${s.points[1].y},${s.points[2].x},${s.points[2].y});\n`;
-      });
-      out.value=code;
+      // Simple append: when a new shape is added to `shapes`, append a single new line
+      // with the generated shape code to the textarea. Do not modify existing lines.
+      if (!shapes || shapes.length === 0) return;
+      const s = shapes[shapes.length - 1];
+      if (!s) return;
+      let line = '';
+      if (s.type === 'rect') line = `rect(${s.x},${s.y},${s.w},${s.h});`;
+      else if (s.type === 'ellipse') line = `ellipse(${s.cx},${s.cy},${s.rx*2},${s.ry*2});`;
+      else if (s.type === 'triangle') line = `triangle(${s.points[0].x},${s.points[0].y},${s.points[1].x},${s.points[1].y},${s.points[2].x},${s.points[2].y});`;
+      else return;
+
+      // Ensure we append on a new line
+      if (out.value.length > 0 && !out.value.endsWith('\n')) out.value += '\n';
+      out.value += line + '\n';
     }
 
     // live writeback with comment support
     out.addEventListener('input', ()=>{
-      const lines=out.value.split('\n').filter(l=>l.trim() && !l.startsWith('//') && !l.startsWith('fill'));
-      const newShapes=[];
-      lines.forEach(line=>{
+      const lines = out.value.split('\n');
+      const newShapes = [];
+
+      lines.forEach(line => {
+        // Ignore anything after '//' for parsing (but keep comments in the textarea)
+        const codePart = (line.split('//')[0] || '').trim();
+        if (!codePart) return; // blank or comment-only
+        if (codePart.startsWith('fill')) return; // ignore fill lines
+
         let m;
-        if (line.startsWith('rect')){ m=line.match(/rect\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m)newShapes.push({type:'rect', x:parseFloat(m[1]), y:parseFloat(m[2]), w:parseFloat(m[3]), h:parseFloat(m[4])});}
-        else if (line.startsWith('ellipse')){ m=line.match(/ellipse\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m)newShapes.push({type:'ellipse', cx:parseFloat(m[1]), cy:parseFloat(m[2]), rx:parseFloat(m[3])/2, ry:parseFloat(m[4])/2});}
-        else if (line.startsWith('triangle')){ m=line.match(/triangle\(([^,]+),([^,]+),([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m)newShapes.push({type:'triangle', points:[{x:parseFloat(m[1]),y:parseFloat(m[2])},{x:parseFloat(m[3]),y:parseFloat(m[4])},{x:parseFloat(m[5]),y:parseFloat(m[6])}]});}
+        if (codePart.startsWith('rect')){ m=codePart.match(/rect\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m) newShapes.push({type:'rect', x:parseFloat(m[1]), y:parseFloat(m[2]), w:parseFloat(m[3]), h:parseFloat(m[4])}); }
+        else if (codePart.startsWith('ellipse')){ m=codePart.match(/ellipse\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m) newShapes.push({type:'ellipse', cx:parseFloat(m[1]), cy:parseFloat(m[2]), rx:parseFloat(m[3])/2, ry:parseFloat(m[4])/2}); }
+        else if (codePart.startsWith('triangle')){ m=codePart.match(/triangle\(([^,]+),([^,]+),([^,]+),([^,]+),([^,]+),([^\)]+)\)/); if(m) newShapes.push({type:'triangle', points:[{x:parseFloat(m[1]),y:parseFloat(m[2])},{x:parseFloat(m[3]),y:parseFloat(m[4])},{x:parseFloat(m[5]),y:parseFloat(m[6])}]}); }
       });
-      shapes=newShapes;
-      trianglePoints=[];
+
+      shapes = newShapes;
+      trianglePoints = [];
       redraw();
     });
   </script>
