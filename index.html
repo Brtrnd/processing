@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Processing Shape Exporter</title>
+  <style>
+    body { font-family: sans-serif; display:flex; gap:1rem; }
+    #canvas { border:1px solid #000; cursor: crosshair; }
+    textarea { width:300px; height:400px; }
+  </style>
+</head>
+<body>
+  <!-- mode selector UI -->
+  <div>
+    <label><input type="radio" name="mode" value="rect" checked> Rect</label>
+    <label><input type="radio" name="mode" value="ellipse"> Ellipse</label>
+    <br>
+    <label><input type="radio" name="ellipseMode" value="center" checked> Ellipse from Center</label>
+    <label><input type="radio" name="ellipseMode" value="topleft"> Ellipse from Top-Left</label>
+    <br>
+    <label>Canvas Size: <select id="canvasSize">
+      <option value="400">400x400</option>
+      <option value="600" selected>600x600</option>
+      <option value="800">800x800</option>
+    </select></label>
+  </div>
+
+  <!-- canvas to draw on -->
+  <canvas id="canvas" width="600" height="600"></canvas>
+
+  <!-- output area -->
+  <textarea id="out"></textarea>
+
+  <script>
+    const cv = document.getElementById('canvas');
+    const ctx = cv.getContext('2d');
+    const out = document.getElementById('out');
+    const canvasSizeDropdown = document.getElementById('canvasSize');
+
+    let mode = 'rect'; // ui controlled
+    let ellipseMode = 'center';
+    let start = null;
+    let shapes = []; // {type:'rect'|'ellipse', x,y,w,h, cx,cy,rx,ry}
+
+    cv.addEventListener('mousedown', e => { start = { x: e.offsetX, y: e.offsetY }; });
+
+    cv.addEventListener('mouseup', e => {
+      if (!start) return;
+      if (mode === 'rect'){
+        const w = e.offsetX - start.x;
+        const h = e.offsetY - start.y;
+        shapes.push({ type:'rect', x:start.x, y:start.y, w, h });
+      } else if (mode === 'ellipse'){
+        if (ellipseMode === 'center'){
+          const cx = start.x;
+          const cy = start.y;
+          const rx = Math.abs(e.offsetX - cx);
+          const ry = Math.abs(e.offsetY - cy);
+          shapes.push({ type:'ellipse', cx, cy, rx, ry });
+        } else { // topleft
+          const x = start.x;
+          const y = start.y;
+          const w = e.offsetX - x;
+          const h = e.offsetY - y;
+          shapes.push({ type:'ellipse', cx: x + w/2, cy: y + h/2, rx: Math.abs(w/2), ry: Math.abs(h/2) });
+        }
+      }
+      redraw();
+      dump();
+      start = null;
+    });
+
+    // triangle mode: 3 clicks define 3 punten
+// live-drag: toon de vorm tijdens mousemove wanneer start!=null
+// live-coords: toon muispositie onder canvas
+Array.from(document.querySelectorAll('input[name="mode"]')).forEach(r=>{
+      r.addEventListener('change', e=>{ mode = e.target.value; });
+    });
+    Array.from(document.querySelectorAll('input[name="ellipseMode"]')).forEach(r=>{
+      r.addEventListener('change', e=>{ ellipseMode = e.target.value; });
+    });
+
+    canvasSizeDropdown.addEventListener('change', e => {
+      const size = parseInt(e.target.value);
+      cv.width = size;
+      cv.height = size;
+      redraw();
+    });
+
+    function redraw(){
+      ctx.clearRect(0,0,cv.width,cv.height);
+      shapes.forEach(s=>{
+        if (s.type==='rect') ctx.strokeRect(s.x,s.y,s.w,s.h);
+        if (s.type==='ellipse'){
+          ctx.beginPath();
+          ctx.ellipse(s.cx, s.cy, s.rx, s.ry, 0, 0, Math.PI*2);
+          ctx.stroke();
+        }
+      });
+    }
+
+    function dump(){
+      let code = 'fill(0);\n';
+      code += shapes.map(s=>{
+        if (s.type==='rect') return `rect(${s.x}, ${s.y}, ${s.w}, ${s.h});`;
+        if (s.type==='ellipse') return `ellipse(${s.cx}, ${s.cy}, ${s.rx*2}, ${s.ry*2});`;
+      }).join("\n");
+      out.value = code;
+    }
+
+    // live writeback: parse textarea changes
+    out.addEventListener('input', ()=>{
+      const lines = out.value.split('\n').filter(l=>l.trim() && !l.startsWith('fill'));
+      const newShapes = [];
+      lines.forEach(line => {
+        let m;
+        if (line.startsWith('rect')){
+          m = line.match(/rect\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/);
+          if (m) newShapes.push({ type:'rect', x: parseFloat(m[1]), y: parseFloat(m[2]), w: parseFloat(m[3]), h: parseFloat(m[4]) });
+        } else if (line.startsWith('ellipse')){
+          m = line.match(/ellipse\(([^,]+),([^,]+),([^,]+),([^\)]+)\)/);
+          if (m){
+            newShapes.push({ type:'ellipse', cx: parseFloat(m[1]), cy: parseFloat(m[2]), rx: parseFloat(m[3])/2, ry: parseFloat(m[4])/2 });
+          }
+        }
+      });
+      shapes = newShapes;
+      redraw();
+    });
+  </script>
+</body>
+</html>
